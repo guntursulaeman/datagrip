@@ -23,20 +23,42 @@ where id = 15245
 
 exec sprocCalculateStokv31 'RT0000038965', '2022-09-01', '2022-12-31'
 exec sprocCalculateStokv3WithKec 'RT0000036758', '2022-09-01', '2022-12-31', '517104'
-select *
-from RetailerStokCopy
-where IdRetailer = 'RT0000038965'
-  and Bulan = 12
 
-select *
-from RetailerStok
-where IdRetailer = 'RT0000036758'
-  and IdKecamatan = '517102'
-order by Bulan, IdKecamatan
 
+select sum(JumlahStok)
+from ProdukRetailerStok
+where IdProdukRetailer = 14624
+order by CreatedAt desc
 select *
-from MasterKecamatan
-where id in ('517104', '517102')
+from produkretailer
+where IdRetailer = 'RT0000036779'
+
+exec RecalculateStokAwalAkhirV11 14624, 0
+
+begin tran
+insert into ProdukRetailerStokCopy (Id, IdProdukRetailer, KodeTransaksiStok, StokAwal, JumlahStok, StokAkhir, TipeStok,
+                                    Deskripsi, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, Catatan)
+select Id,
+       IdProdukRetailer,
+       KodeTransaksiStok,
+       StokAwal,
+       JumlahStok,
+       StokAkhir,
+       TipeStok,
+       Deskripsi,
+       CreatedAt,
+       CreatedBy,
+       UpdatedAt,
+       UpdatedBy,
+       'backup karena ada selisih stokawal-stokakhir'
+from ProdukRetailerStok
+where IdProdukRetailer = 14624
+  and id not in (select id from ProdukRetailerStokCopy where IdProdukRetailer = 14624)
+order by Id
+rollback
+
+select distinct Catatan
+from ProdukRetailerStokCopy
 
 select sum(b.Qty) qty, a.KodeRetailer, a.IdKecamatan, IdProdukRetailer
 from pkp a
@@ -45,19 +67,6 @@ where Status = 'r'
   and (DocDate between '2022-08-01' and '2022-08-30')
   and KodeRetailer = 'RT0000050673'
 group by a.KodeRetailer, a.IdKecamatan, IdProdukRetailer
-
-select *
-from RetailerStok
-where IdRetailer = 'RT0000050673'
-  and Bulan = 8
-
-select a.IdRetailer, left(KodeDesa, 6) idKecamatan, b.IdProdukRetailer, sum(Qty) qty
-from penjualan a
-         inner join penjualanprodukretailer b on a.Id = b.IdPenjualan
-where a.IdRetailer = 'RT0000050673'
-  and JenisPenjualan = '1'
-  and (TanggalNota between '2022-10-01' and '2022-10-30')
-group by IdProdukRetailer, a.IdRetailer, left(KodeDesa, 6), b.IdProdukRetailer
 
 select id,
        idretailer,
@@ -83,35 +92,56 @@ group by a.KodeRetailer, a.IdKecamatan, IdProdukRetailer
 
 --=====================================================================================
 
-select b.KodeProduk,
-       Bulan,
-       Tahun,
-       sum(StokAwal)   stokawal,
-       sum(Penebusan)  penebusan,
-       sum(Penyaluran) penyaluran,
-       sum(StokAkhir)  stokakhir
-from RetailerStokCopy a
-         inner join produkretailer b on a.IdProdukRetailer = b.Id
-where a.IdRetailer <> 'PT0000065722'
-group by b.KodeProduk, Bulan, Tahun
-order by Tahun, Bulan
+;
+with dataMutasiPkp as (select IdPenjualanProdukRetailer, sum(Qty) qtyMutasi
+                       from penjualanprodukretailerpkp
+                       group by IdPenjualanProdukRetailer)
+select a.NoNota, TanggalNota, b.id, b.qty, c.qtyMutasi,a.Catatan
+from penjualan a
+         inner join PenjualanProdukRetailer b on a.Id = b.IdPenjualan
+         inner join dataMutasiPkp c on b.Id = c.IdPenjualanProdukRetailer
+where IdRetailer = 'RT0000038978'
+  and b.Qty <> c.qtyMutasi
 
-exec sprocTableRetailerStok 'RT0000036758', '2023-05-16'
 
-select datefromparts(year(getdate()), month(getdate()), 1),
-       dateadd(day, -1, datefromparts(year(getdate()), month(getdate()), 1))
 
-select *
-from RetailerRoles
-where IdRetailer = 'RT0000087983'
+select c.KodeProduk, sum(d.Qty) qtymutasi
+from penjualan a
+         inner join penjualanprodukretailer b on a.Id = b.IdPenjualan
+         inner join produkretailer c on b.IdProdukRetailer = c.Id
+inner join dbo.PenjualanProdukRetailerPkp d on b.Id = d.IdPenjualanProdukRetailer
+where a.IdRetailer = 'RT0000038978'
+  and TanggalNota >= '2022-09-01'
+group by c.KodeProduk
 
-declare @idRetailer   varchar(12)
+select KodeProduk, sum(b.Qty) qty,sum(b.Stok) stok
+from pkp a
+         inner join pkpdetail b on a.Id = b.IdPkp
+         inner join ProdukRetailer c on b.IdProdukRetailer = c.Id
+where DocDate >= '2022-09-01'
+  and IdRetailer = 'RT0000038978' and a.Status = 'r'
+group by KodeProduk
+
+select b.* from pkp a
+inner join pkpdetail b on a.Id = b.IdPkp
+where KodeRetailer = 'RT0000038978' and KodeProdukRMS = 'UN46'
+order by CreatedAt desc
+
+select * from udfTableRetailerStokAwal('RT0000055104',9,2023)
+select * from RetailerStok where IdRetailer = 'RT0000055104' and Bulan in (8,9,10)
+
+select * from TPubersClaim where NoNota = 'STET91/C005YT' order by CreatedDate desc
+select * from TPubersClaim where sts = 2 order by CreatedDate desc
+
+
+declare @idRetailer   varchar(12) = 'RT0000088980'
 declare @stockDate    datetime
+declare @cutoffDate    datetime
 declare @stockDateNew datetime
 declare @bulan        int
 declare @tahun        int
 set @stockDate = getdate()
-declare @loop int = 2
+declare @loop int = 5
 
 while @loop >= 0
     begin
@@ -119,21 +149,25 @@ while @loop >= 0
         set @tahun = year(dateadd(month, @loop * -1, @stockDate))
         set @stockDateNew = dateadd(day, -1, dateadd(month, 1, datefromparts(@tahun, @bulan, 1)))
         declare retailerCursor cursor
-            for select IdRetailer
+            for select IdRetailer, TanggalStokAwal
                 from RetailerRoles
-                where isF6Rekan = 1
-                  and IdRetailer = 'RT0000087983'
+                where IdRetailer = 'RT0000088980' and isF6Rekan = 1 and TanggalStokAwal<=@stockDateNew
         open retailerCursor
-        fetch next from retailerCursor into @idRetailer
+        fetch next from retailerCursor into @idRetailer,@cutoffDate
         while @@fetch_status = 0
             begin
-                exec sprocCalculateStokv3 @idRetailer, '2022-09-01', @stockDateNew
-                fetch next from retailerCursor into @idRetailer
+                exec sprocCalculateStokv4 @idRetailer, @cutoffDate, @stockDateNew
+                fetch next from retailerCursor into @idRetailer,@cutoffDate
             end
         close retailerCursor
         deallocate retailerCursor
-
-        exec sprocCalculateStokv3WithKec 'RT0000036758', '2022-09-01', @stockDate, '517104'
-        exec sprocCalculateStokv3WithKec 'RT0000036758', '2022-09-01', @stockDate, '517102'
         set @loop = @loop - 1
     end
+
+    select * from udfTableRetailerStokAwal('RT0000035725',5,2023)
+
+begin tran
+delete from RetailerStok where IdRetailer = 'RT0000035725'
+rollback
+
+select * from RetailerStok where IdRetailer = 'RT0000088980' order by Tahun,Bulan
